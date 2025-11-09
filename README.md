@@ -8,6 +8,8 @@ and keeping searchable history of barcode detections.
 - Live webcam preview with barcode detection using [pyzbar](https://github.com/NaturalHistoryMuseum/pyzbar)
 - Optional MP4 recording of each session with OpenCV
 - Automatic storage of detected barcode, timestamp, and related video path
+- Bounding-box overlay for live barcode detections
+- Quick actions to open recorded video files directly from capture or search results
 - Search screen to filter detections by barcode fragment or date
 - Daily report tab summarizing how many barcodes were captured per day
 
@@ -43,7 +45,8 @@ Enter a partial barcode or date (`YYYY-MM-DD`) and click **Search**. Results sho
 
 ### Reports Tab
 
-Displays a daily summary of barcode detections. Click **Refresh Report** to update the list.
+Displays a daily summary of barcode detections. Click **Refresh Report** to update the list or **Export CSV** to write a dated
+report under `data/`.
 
 ## Project Structure
 

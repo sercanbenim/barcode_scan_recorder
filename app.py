@@ -8,9 +8,12 @@ metadata can be searched and aggregated by day within the app.
 
 from __future__ import annotations
 
+import csv
 import datetime as dt
 import os
 import sqlite3
+import subprocess
+import sys
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -166,8 +169,14 @@ class BarcodeRecorderApp(tk.Tk):
         self.capture_list.column("video", width=180)
         self.capture_list.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
 
-        refresh_btn = ttk.Button(controls_frame, text="Refresh List", command=self.refresh_capture_list)
-        refresh_btn.pack(fill=tk.X, pady=5)
+        button_row = ttk.Frame(controls_frame)
+        button_row.pack(fill=tk.X, pady=5)
+
+        refresh_btn = ttk.Button(button_row, text="Refresh", command=self.refresh_capture_list)
+        refresh_btn.pack(side=tk.LEFT, expand=True, fill=tk.X)
+
+        open_btn = ttk.Button(button_row, text="Open Video", command=self.open_selected_capture_video)
+        open_btn.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(5, 0))
 
         self.refresh_capture_list()
 
@@ -190,6 +199,7 @@ class BarcodeRecorderApp(tk.Tk):
 
         ttk.Button(actions, text="Search", command=self.perform_search).pack(side=tk.LEFT)
         ttk.Button(actions, text="Clear", command=self.clear_search).pack(side=tk.LEFT, padx=5)
+        ttk.Button(actions, text="Open Video", command=self.open_selected_search_video).pack(side=tk.LEFT, padx=(5, 0))
 
         self.search_results = ttk.Treeview(
             self.search_tab,
@@ -222,8 +232,11 @@ class BarcodeRecorderApp(tk.Tk):
         self.report_tree.column("total", width=150)
         self.report_tree.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        refresh_btn = ttk.Button(self.report_tab, text="Refresh Report", command=self.refresh_report)
-        refresh_btn.pack(padx=10, pady=(0, 10), anchor=tk.E)
+        action_row = ttk.Frame(self.report_tab)
+        action_row.pack(fill=tk.X, padx=10, pady=(0, 10))
+
+        ttk.Button(action_row, text="Refresh Report", command=self.refresh_report).pack(side=tk.RIGHT)
+        ttk.Button(action_row, text="Export CSV", command=self.export_daily_report).pack(side=tk.RIGHT, padx=(0, 5))
 
         self.refresh_report()
 
@@ -283,6 +296,18 @@ class BarcodeRecorderApp(tk.Tk):
                 self.refresh_capture_list_async()
                 self.refresh_report_async()
 
+            x, y, w, h = barcode.rect
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            cv2.putText(
+                frame,
+                barcode_data,
+                (x, max(0, y - 10)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (0, 255, 0),
+                2,
+            )
+
     def toggle_recording(self) -> None:
         if self.is_recording:
             self._stop_recording()
@@ -340,6 +365,43 @@ class BarcodeRecorderApp(tk.Tk):
     def refresh_capture_list_async(self) -> None:
         self.after(0, self.refresh_capture_list)
 
+    def _get_first_selected_value(self, tree: ttk.Treeview) -> Optional[str]:
+        selection = tree.selection()
+        if not selection:
+            messagebox.showinfo("Open Video", "Select a row that has an associated video.")
+            return None
+        video_path = tree.set(selection[0], "video")
+        if not video_path:
+            messagebox.showinfo("Open Video", "The selected row has no stored video path.")
+            return None
+        return video_path
+
+    def open_selected_capture_video(self) -> None:
+        path = self._get_first_selected_value(self.capture_list)
+        if path:
+            self._open_video_file(path)
+
+    def open_selected_search_video(self) -> None:
+        path = self._get_first_selected_value(self.search_results)
+        if path:
+            self._open_video_file(path)
+
+    def _open_video_file(self, path: str) -> None:
+        file_path = Path(path)
+        if not file_path.exists():
+            messagebox.showerror("Open Video", f"File not found:\n{file_path}")
+            return
+
+        try:
+            if sys.platform.startswith("darwin"):
+                subprocess.Popen(["open", str(file_path)])
+            elif os.name == "nt":
+                os.startfile(str(file_path))  # type: ignore[attr-defined]
+            else:
+                subprocess.Popen(["xdg-open", str(file_path)])
+        except Exception as exc:  # pragma: no cover - platform specific
+            messagebox.showerror("Open Video", f"Could not open video file:\n{exc}")
+
     def perform_search(self) -> None:
         barcode = self.search_barcode_var.get().strip()
         date_str = self.search_date_var.get().strip()
@@ -376,6 +438,25 @@ class BarcodeRecorderApp(tk.Tk):
 
     def refresh_report_async(self) -> None:
         self.after(0, self.refresh_report)
+
+    def export_daily_report(self) -> None:
+        rows = list(self.query_daily_counts())
+        if not rows:
+            messagebox.showinfo("Export Report", "No data available to export.")
+            return
+
+        export_dir = DATA_DIR
+        export_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"daily_report_{dt.datetime.now():%Y%m%d_%H%M%S}.csv"
+        export_path = export_dir / filename
+
+        with export_path.open("w", newline="", encoding="utf-8") as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow(["Date", "Total Detections"])
+            for row in rows:
+                writer.writerow([row["day"], row["total"]])
+
+        messagebox.showinfo("Export Report", f"Report saved to:\n{export_path}")
 
     # ------------------------------------------------------------------
     def on_close(self) -> None:
